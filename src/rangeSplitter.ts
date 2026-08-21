@@ -13,6 +13,11 @@ export async function fetchRange(
 ): Promise<ethers.Log[]> {
   if (fromBlock > toBlock) return []
 
+  const initialRange = toBlock - fromBlock + 1
+  if (initialRange > 100_000) {
+    console.warn(`Large backlog detected: ${initialRange} blocks behind, this may take a while`)
+  }
+
   try {
     return await fetchFn({ fromBlock, toBlock })
   } catch (err) {

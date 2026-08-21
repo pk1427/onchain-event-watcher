@@ -4,7 +4,9 @@
   "description": "USDC Transfer event watcher for Loops House Road To Devcon - I",
   "main": "index.js",
   "scripts": {
-    "start": "tsx src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
   },
   "keywords": [],
   "author": "",

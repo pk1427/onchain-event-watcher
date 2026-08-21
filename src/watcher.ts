@@ -4,7 +4,7 @@ import { State, loadState, saveState } from './state'
 import { fetchRange } from './rangeSplitter'
 import { topic0 } from './topics'
 
-let state: State = loadState()
+let state: State
 
 export async function getSafeBlock(provider: JsonRpcProvider): Promise<number> {
   const block = await provider.send('eth_getBlockByNumber', ['safe', false])
@@ -27,15 +27,18 @@ function pruneAlertedIds(state: State, currentBlock: number, window: number = 10
 }
 
 async function poll(provider: JsonRpcProvider): Promise<void> {
+  console.log('Fetching safe block...')
   const safeBlock = await getSafeBlock(provider)
 
   if (safeBlock <= state.lastProcessedBlock) {
+    console.log(`Safe block ${safeBlock} <= lastProcessedBlock ${state.lastProcessedBlock}, sleeping ${CONFIG.pollIntervalMs}ms`)
     await sleep(CONFIG.pollIntervalMs)
     return
   }
 
   const fromBlock = state.lastProcessedBlock + 1
   const toBlock = safeBlock
+  console.log(`Safe block: ${safeBlock}, range: ${fromBlock}-${toBlock}`)
 
   const logs = await fetchRange(
     async ({ fromBlock: fb, toBlock: tb }) => {
@@ -56,6 +59,8 @@ async function poll(provider: JsonRpcProvider): Promise<void> {
     fromBlock,
     toBlock,
   )
+
+  console.log(`Fetched ${logs.length} logs for range ${fromBlock}-${toBlock}`)
 
   for (const log of logs) {
     const logId = makeLogId(log.transactionHash, Number((log as any).logIndex))
@@ -79,6 +84,7 @@ async function poll(provider: JsonRpcProvider): Promise<void> {
     saveState(state)
   }
 
+  console.log(`Sleeping ${CONFIG.pollIntervalMs}ms until next poll`)
   await sleep(CONFIG.pollIntervalMs)
 }
 
@@ -90,6 +96,9 @@ export async function startWatcher(): Promise<void> {
   const provider = new JsonRpcProvider(CONFIG.rpcUrl)
 
   console.log('Watcher started. Watching for USDC transfers...')
+  const safeBlock = await getSafeBlock(provider)
+  state = loadState(safeBlock)
+  console.log(`Loaded state: lastProcessedBlock=${state.lastProcessedBlock}, alertedLogIds count=${state.alertedLogIds.length}`)
   console.log(`Starting from block ${state.lastProcessedBlock}`)
 
   while (true) {
@@ -97,6 +106,8 @@ export async function startWatcher(): Promise<void> {
       await poll(provider)
     } catch (err) {
       console.error('Poll error:', err)
+      console.error('Stack:', (err as Error).stack)
+      console.log(`Sleeping 5000ms before retry`)
       await sleep(5000)
     }
   }

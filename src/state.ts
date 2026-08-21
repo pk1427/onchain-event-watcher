@@ -11,7 +11,7 @@ const defaultState: State = {
   alertedLogIds: [],
 }
 
-export function loadState(): State {
+export function loadState(safeBlockNumber?: number): State {
   try {
     if (existsSync(CONFIG.stateFilePath)) {
       const raw = readFileSync(CONFIG.stateFilePath, 'utf-8')
@@ -20,7 +20,8 @@ export function loadState(): State {
   } catch {
     // ignore corrupt file and return defaults
   }
-  return { ...defaultState }
+  const lastProcessedBlock = safeBlockNumber !== undefined ? safeBlockNumber - 1 : 0
+  return { ...defaultState, lastProcessedBlock }
 }
 
 export function saveState(state: State): void {
