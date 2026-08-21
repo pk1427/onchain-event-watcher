@@ -77,7 +77,7 @@ After alerts fire, check `state.json`. Every `alertedLogId` is unique. Restartin
 
 Real terminal output from a live run against Ethereum mainnet. The watcher caught hundreds of USDC transfers across blocks `25806300`–`25806370`, including large moves (100k+ USDC) and dust transfers. Each alert is unique (`txHash-logIndex`), no duplicates fired.
 
-![Live terminal proof](Proof.png)
+![Live terminal proof](/screenshots/Proof.png)
 
 After this session, `state.json` contained **9,146 unique `alertedLogIds`** and `lastProcessedBlock` had advanced to `25806370`.
 
