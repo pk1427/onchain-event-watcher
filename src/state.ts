@@ -1,3 +1,5 @@
+// Persistent state management: load/save lastProcessedBlock and alertedLogIds to JSON.
+
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { CONFIG } from './config'
 

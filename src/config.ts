@@ -1,3 +1,5 @@
+// Watcher configuration: contract address, event signature, poll interval, and RPC settings.
+
 import dotenv from 'dotenv'
 
 dotenv.config()

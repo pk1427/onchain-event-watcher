@@ -1,3 +1,5 @@
+// Core poll loop: fetch safe block, query logs, dedup, alert, persist state.
+
 import { ethers, JsonRpcProvider } from 'ethers'
 import { CONFIG } from './config'
 import { State, loadState, saveState } from './state'

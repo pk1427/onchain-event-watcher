@@ -1,3 +1,5 @@
+// Entry point: start watcher with graceful shutdown on SIGINT/SIGTERM.
+
 import { startWatcher } from './watcher'
 
 process.on('SIGINT', () => {
@@ -10,7 +12,7 @@ process.on('SIGTERM', () => {
   process.exit(0)
 })
 
-startWatcher().catch((err) => {
+startWatcher().catch((err: Error) => {
   console.error('Fatal error:', err)
   process.exit(1)
 })

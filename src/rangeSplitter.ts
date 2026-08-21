@@ -1,3 +1,5 @@
+// Recursive range bisection: split eth_getLogs ranges that exceed the provider's limit.
+
 import { ethers } from 'ethers'
 import { CONFIG } from './config'
 

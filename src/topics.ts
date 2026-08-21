@@ -1,3 +1,5 @@
+// Compute topic0 (keccak256 of canonical event signature) for server-side log filtering.
+
 import { ethers } from 'ethers'
 import { CONFIG } from './config'
 
