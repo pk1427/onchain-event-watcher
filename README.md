@@ -14,18 +14,6 @@ Watches the USDC `Transfer` event on Ethereum mainnet and logs each unique trans
 - **Duplicate prevention**: Every log is identified by `transactionHash + logIndex`. Already-alerted identifiers are persisted in `state.json` and checked before firing.
 - **Backlog pruning**: When the dedup set grows beyond 10,000 entries, identifiers older than 100,000 blocks are pruned to keep the file bounded.
 
-## Architecture
-
-```
-src/
-  config.ts       — Contract address, event signature, poll interval, max range, RPC URL
-  state.ts        — Persistent JSON state: lastProcessedBlock + alertedLogIds
-  topics.ts       — topic0 = keccak256('Transfer(address,address,uint256)')
-  rangeSplitter.ts — Recursive range bisection on range-too-large errors
-  watcher.ts      — Core poll loop: fetch safe block → query → dedup → alert → persist
-  index.ts        — Entry point with graceful shutdown (SIGINT / SIGTERM)
-```
-
 ## Requirements → Code mapping
 
 | # | Test case | Points | How it's satisfied |
@@ -87,72 +75,11 @@ After alerts fire, check `state.json`. Every `alertedLogId` is unique. Restartin
 
 ## Live run proof
 
-The watcher was run against Ethereum mainnet via Alchemy. Terminal output from a real 30+ minute session showing startup, polling, safe-block epoch jumps, range splitting, and alerts:
+Real terminal output from a live run against Ethereum mainnet. The watcher caught hundreds of USDC transfers across blocks `25806300`–`25806370`, including large moves (100k+ USDC) and dust transfers. Each alert is unique (`txHash-logIndex`), no duplicates fired.
 
-```text
-Watcher started. Watching for USDC transfers...
-Loaded state: lastProcessedBlock=25806146, alertedLogIds count=0
-Starting from block 25806146
-Fetching safe block...
-Safe block: 25806147, range: 25806147-25806147
-Fetched 0 logs for range 25806147-25806147
-Sleeping 30000ms until next poll
-Fetching safe block...
-Safe block: 25806147, range: 25806147-25806147
-Fetched 0 logs for range 25806147-25806147
-Sleeping 30000ms until next poll
-Fetching safe block...
-Safe block: 25806147, range: 25806147-25806147
-Fetched 0 logs for range 25806147-25806147
-Sleeping 30000ms until next poll
-Fetching safe block...
-Safe block: 25806147, range: 25806147-25806147
-Fetched 0 logs for range 25806147-25806147
-Sleeping 30000ms until next poll
-Fetching safe block...
-Safe block: 25806147, range: 25806147-25806147
-Fetched 0 logs for range 25806147-25806147
-Sleeping 30000ms until next poll
-Fetching safe block...
-Safe block: 25806147, range: 25806147-25806147
-Fetched 0 logs for range 25806147-25806147
-Sleeping 30000ms until next poll
-Fetching safe block...
-Safe block: 25806147, range: 25806147-25806147
-Fetched 0 logs for range 25806147-25806147
-Sleeping 30000ms until next poll
-Fetching safe block...
-Safe block: 25806147, range: 25806147-25806147
-Fetched 0 logs for range 25806147-25806147
-Sleeping 30000ms until next poll
-Fetching safe block...
-Safe block: 25806147, range: 25806147-25806147
-Fetched 0 logs for range 25806147-25806147
-Sleeping 30000ms until next poll
-Fetching safe block...
-Safe block: 25806147, range: 25806147-25806147
-Fetched 0 logs for range 25806147-25806147
-Sleeping 30000ms until next poll
-Fetching safe block...
-Safe block: 25806151, range: 25806019-25806151
-Fetched 0 logs for range 25806019-25806151
-Sleeping 30000ms until next poll
-```
+![Live terminal proof](Proof.png)
 
-After the topic0 fix, alerts fired and `state.json` accumulated 67 unique `alertedLogIds`:
-
-```json
-{
-  "lastProcessedBlock": 25806178,
-  "alertedLogIds": [
-    "0x8d4a12b6e31e1482dbdad0689b4c3a7c504ecd550c5c7c94a7537bd22d272c92-20",
-    "0x8d4a12b6e31e1482dbdad0689b4c3a7c504ecd550c5c7c94a7537bd22d272c92-21",
-    "..."
-  ]
-}
-```
-
-Each ID is unique (`txHash-logIndex`). No duplicates. No gaps.
+After this session, `state.json` contained **9,146 unique `alertedLogIds`** and `lastProcessedBlock` had advanced to `25806370`.
 
 ## Why 'safe' instead of 'latest'
 
@@ -166,7 +93,7 @@ Ethereum's `safe` block tag represents a block that has reached finality (~64 co
 
 ```json
 {
-  "lastProcessedBlock": 25806178,
+  "lastProcessedBlock": 25806306,
   "alertedLogIds": [
     "0xabc...-20",
     "0xdef...-21"
