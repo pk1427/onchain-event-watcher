@@ -6,18 +6,16 @@ import { State, loadState, saveState } from './state'
 import { fetchRange } from './rangeSplitter'
 import { topic0 } from './topics'
 
-let state: State
-
 export async function getSafeBlock(provider: JsonRpcProvider): Promise<number> {
   const block = await provider.send('eth_getBlockByNumber', ['safe', false])
   return Number(block.number)
 }
 
-function makeLogId(txHash: string, logIndex: number): string {
-  return `${txHash}-${logIndex}`
+export function makeLogId(txHash: string, logIndex: number, blockNumber: number): string {
+  return `${txHash}-${logIndex}-${blockNumber}`
 }
 
-function pruneAlertedIds(state: State, currentBlock: number, window: number = 100_000): State {
+export function pruneAlertedIds(state: State, currentBlock: number, window: number = 100_000): State {
   if (state.alertedLogIds.length <= 10_000) return state
   const cutoff = currentBlock - window
   const kept = state.alertedLogIds.filter((id) => {
@@ -28,14 +26,19 @@ function pruneAlertedIds(state: State, currentBlock: number, window: number = 10
   return { ...state, alertedLogIds: kept }
 }
 
-async function poll(provider: JsonRpcProvider): Promise<void> {
-  console.log('Fetching safe block...')
+export interface PollResult {
+  logsFound: number
+  alertsFired: number
+  toBlock: number
+  state: State
+}
+
+export async function poll(provider: JsonRpcProvider, currentState: State): Promise<PollResult> {
   const safeBlock = await getSafeBlock(provider)
+  let state = currentState
 
   if (safeBlock <= state.lastProcessedBlock) {
-    console.log(`Safe block ${safeBlock} <= lastProcessedBlock ${state.lastProcessedBlock}, sleeping ${CONFIG.pollIntervalMs}ms`)
-    await sleep(CONFIG.pollIntervalMs)
-    return
+    return { logsFound: 0, alertsFired: 0, toBlock: state.lastProcessedBlock, state }
   }
 
   const fromBlock = state.lastProcessedBlock + 1
@@ -53,9 +56,11 @@ async function poll(provider: JsonRpcProvider): Promise<void> {
         },
       ])
       return result.map((log: any) => ({
-        ...log,
         blockNumber: BigInt(log.blockNumber),
         logIndex: Number(log.logIndex),
+        transactionHash: log.transactionHash,
+        topics: log.topics,
+        data: log.data,
       }))
     },
     fromBlock,
@@ -64,30 +69,33 @@ async function poll(provider: JsonRpcProvider): Promise<void> {
 
   console.log(`Fetched ${logs.length} logs for range ${fromBlock}-${toBlock}`)
 
+  let alertsFired = 0
   for (const log of logs) {
-    const logId = makeLogId(log.transactionHash, Number((log as any).logIndex))
+    const logBlockNum = Number(log.blockNumber)
+    const logId = makeLogId(log.transactionHash, Number((log as any).logIndex), logBlockNum)
     if (state.alertedLogIds.includes(logId)) continue
 
     const fromAddr = '0x' + log.topics[1].slice(26)
     const toAddr = '0x' + log.topics[2].slice(26)
     const value = ethers.formatUnits(log.data, 6)
 
-    console.log(`[ALERT] Transfer: ${fromAddr} -> ${toAddr} | ${value} USDC | block ${Number(log.blockNumber)}`)
+    console.log(`[ALERT] Transfer: ${fromAddr} -> ${toAddr} | ${value} USDC | block ${logBlockNum}`)
+    alertsFired++
 
     state = {
       ...state,
       alertedLogIds: [...state.alertedLogIds, logId],
-      lastProcessedBlock: Number(log.blockNumber),
     }
   }
 
-  if (logs.length > 0) {
-    state = pruneAlertedIds(state, safeBlock)
-    saveState(state)
+  state = {
+    ...state,
+    lastProcessedBlock: toBlock,
   }
+  state = pruneAlertedIds(state, safeBlock)
+  saveState(state)
 
-  console.log(`Sleeping ${CONFIG.pollIntervalMs}ms until next poll`)
-  await sleep(CONFIG.pollIntervalMs)
+  return { logsFound: logs.length, alertsFired, toBlock, state }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -99,13 +107,15 @@ export async function startWatcher(): Promise<void> {
 
   console.log('Watcher started. Watching for USDC transfers...')
   const safeBlock = await getSafeBlock(provider)
-  state = loadState(safeBlock)
+  let state = loadState(safeBlock)
   console.log(`Loaded state: lastProcessedBlock=${state.lastProcessedBlock}, alertedLogIds count=${state.alertedLogIds.length}`)
   console.log(`Starting from block ${state.lastProcessedBlock}`)
 
   while (true) {
     try {
-      await poll(provider)
+      const result = await poll(provider, state)
+      state = result.state
+      await sleep(CONFIG.pollIntervalMs)
     } catch (err) {
       console.error('Poll error:', err)
       console.error('Stack:', (err as Error).stack)

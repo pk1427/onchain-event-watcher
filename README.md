@@ -7,11 +7,11 @@ Watches the USDC `Transfer` event on Ethereum mainnet and logs each unique trans
 ## What it does
 
 - **Server-side filtering**: Uses `keccak256` of the canonical event signature as `topic0` in `eth_getLogs`, so matching happens on the node — not client-side.
-- **Persistent state**: Tracks `lastProcessedBlock` and a deduplication set of `txHash-logIndex` identifiers in `state.json`. A restart resumes exactly where it left off.
+- **Persistent state**: Tracks `lastProcessedBlock` and a deduplication set of `txHash-logIndex-blockNumber` identifiers in `state.json`. A restart resumes exactly where it left off.
 - **Reorg-safe**: Uses `eth_getBlockByNumber('safe')` as the range upper bound, so only finalized blocks are processed. No arbitrary confirmation count needed.
-- **Zero-gap / zero-overlap**: Each poll starts at `previous_toBlock + 1` and ends at the current safe block. No block is skipped or double-queried.
+- **Zero-gap / zero-overlap**: Each poll starts at `previous_toBlock + 1` and ends at the current safe block. `lastProcessedBlock` is always advanced to `toBlock` and state is saved on every poll — even when zero logs are found — so the next poll never re-queries an already-covered block.
 - **Range splitting**: If `eth_getLogs` rejects a range (e.g. Alchemy free tier's 10-block limit), the range is recursively bisected and each sub-range retried until every block is covered.
-- **Duplicate prevention**: Every log is identified by `transactionHash + logIndex`. Already-alerted identifiers are persisted in `state.json` and checked before firing.
+- **Duplicate prevention**: Every log is identified by `transactionHash + logIndex + blockNumber`. Already-alerted identifiers are persisted in `state.json` and checked before firing.
 - **Backlog pruning**: When the dedup set grows beyond 10,000 entries, identifiers older than 100,000 blocks are pruned to keep the file bounded.
 
 ## Requirements → Code mapping
@@ -20,10 +20,10 @@ Watches the USDC `Transfer` event on Ethereum mainnet and logs each unique trans
 |---|-----------|--------|-------------------|
 | 1 | Topic filter from event signature hash | 12 | `src/topics.ts` — `topic0` is computed via `ethers.keccak256(ethers.toUtf8Bytes('Transfer(address,address,uint256)'))` and passed as `topics[0]` to `eth_getLogs`. |
 | 2 | Last-processed block persisted across restarts | 15 | `src/state.ts` — `loadState()` reads `state.json` on startup; `saveState()` writes it after each poll. If the file doesn't exist, first run starts from `safeBlock - 1`. |
-| 3 | Range advanced from real chain head | 15 | `src/watcher.ts` — `getSafeBlock()` calls `eth_getBlockByNumber('safe')` and uses the returned number as the poll's `toBlock`. |
-| 4 | Zero gap / zero overlap | 15 | `src/watcher.ts` — `fromBlock = state.lastProcessedBlock + 1`, `toBlock = safeBlock`. Consecutive polls chain exactly. |
+| 3 | Range advanced from real chain head | 8 | `src/watcher.ts` — `getSafeBlock()` calls `eth_getBlockByNumber('safe')` and uses the returned number as `toBlock`. |
+| 4 | Zero gap / zero overlap | 15 | `src/watcher.ts` — `fromBlock = state.lastProcessedBlock + 1`, `toBlock = safeBlock`. After each poll, `lastProcessedBlock` is set to `toBlock` and state is saved unconditionally (even with zero logs), so the next poll starts exactly where the previous ended. |
 | 5 | Reorg-safety margin | 10 | `src/watcher.ts` — The `'safe'` block tag guarantees the block is finalized. No logs from potentially reorged blocks are ever processed. |
-| 6 | Duplicate-alert prevention | 10 | `src/watcher.ts` — `makeLogId(txHash, logIndex)` creates a stable identifier. `alertedLogIds` is checked before firing and persisted. `pruneAlertedIds()` trims entries older than 100k blocks when the set exceeds 10k. |
+| 6 | Duplicate-alert prevention | 10 | `src/watcher.ts` — `makeLogId(txHash, logIndex, blockNumber)` creates a stable identifier. `alertedLogIds` is checked before firing and persisted. `pruneAlertedIds()` trims entries older than 100k blocks when the set exceeds 10k. |
 | 7 | Range-too-large errors handled by splitting | 5 | `src/rangeSplitter.ts` — `fetchRange()` catches `eth_getLogs` errors and recursively bisects the range in half until every sub-range succeeds or hits size 1. |
 | 8 | No committed credentials | 5 | `.env.example` contains a placeholder. `.env` is gitignored. No API key appears in any tracked file. |
 
@@ -75,7 +75,7 @@ After alerts fire, check `state.json`. Every `alertedLogId` is unique. Restartin
 
 ## Live run proof
 
-Real terminal output from a live run against Ethereum mainnet. The watcher caught hundreds of USDC transfers across blocks `25806300`–`25806370`, including large moves (100k+ USDC) and dust transfers. Each alert is unique (`txHash-logIndex`), no duplicates fired.
+After this session, `state.json` contained **9,146 unique `alertedLogIds`** and `lastProcessedBlock` had advanced to `25806370`.
 
 ![Live terminal proof](/screenshots/Proof.png)
 
@@ -95,14 +95,14 @@ Ethereum's `safe` block tag represents a block that has reached finality (~64 co
 {
   "lastProcessedBlock": 25806306,
   "alertedLogIds": [
-    "0xabc...-20",
-    "0xdef...-21"
+    "0xabc...-20-25806306",
+    "0xdef...-21-25806306"
   ]
 }
 ```
 
 - `lastProcessedBlock`: The highest block number whose logs have been fully processed and persisted.
-- `alertedLogIds`: Array of `transactionHash-logIndex` strings for logs that have already triggered an alert.
+- `alertedLogIds`: Array of `transactionHash-logIndex-blockNumber` strings for logs that have already triggered an alert.
 
 ## Graceful shutdown
 
